@@ -3,7 +3,7 @@ Contributors: devrix, nofearinc
 Donate link: http://devrix.com
 Tags: media, attachment, post
 Requires at least: 3.0
-Tested up to: 4.0
+Tested up to: 4.6
 Stable tag: 0.5
 
 Automatically deletes attached media from posts and custom post types added via the Media button.
