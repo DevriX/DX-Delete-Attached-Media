@@ -4,7 +4,7 @@ Tags: media, attachment, post
 Requires at least: 4.5
 Requires PHP: 7.3
 Tested up to: 6.2
-Stable tag: 2.0.3
+Stable tag: 2.0.5
 
 Automatically deletes attached media from posts and custom post types added via the Media button.
 
@@ -44,6 +44,15 @@ It works for all of your deleted posts, as long as you delete them from the syst
 * Extended support for WooCommerce and Easy Digital Downloads.
 
 == Changelog ==
+
+= 2.0.5 = 
+* Fixed plugin conflict with Post SMTP
+
+= 2.0.4.1 =
+* Revert to version 2.0.3
+
+= 2.0.4 =
+* Fixed plugin conflict with Post SMTP
 
 = 2.0.3 =
 * Fixed security issue

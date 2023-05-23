@@ -5,7 +5,7 @@
  * Description: Delete attached media to all posts (if activated). Remove images assigned to a post to clear old archives.
  * Author: nofearinc
  * Author URI: https://devrix.com
- * Version: 2.0.3
+ * Version: 2.0.5
  */
 
 register_activation_hook( __FILE__, 'am_plugin_activate' );
@@ -336,24 +336,16 @@ function add_dx_dam_js( $hook ) {
 }
 
 add_action( 'init', 'dxdam_admin_user' );
+do_action( 'after_setup_theme', 'dxdam_admin_user' );
 /**
  * Check if the current user is administrator.
  */
 function dxdam_admin_user() {
-
-	if ( ! function_exists( 'wp_get_current_user' ) ) {
-		include ABSPATH . 'wp-includes/pluggable.php';
-	}
-
 	if ( current_user_can( 'manage_options' ) ) {
-		return true;
+		add_action( 'wp_ajax_add_to_base', 'add_to_base', 1 );
 	}
 }
 
-
-if ( dxdam_admin_user() ) {
-	add_action( 'wp_ajax_add_to_base', 'add_to_base', 1 );
-}
 /**
  * Add to base the value of the checkbox/radio button
  */
