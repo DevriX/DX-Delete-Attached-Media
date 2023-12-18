@@ -14,6 +14,7 @@ $(document).ready(function($) {
 			ajaxurl, {
 				data: {
 					"enable-feature" : enable_feature,
+					"nonce" : DX_DAM.nonce,
 				},
 				action: "add_to_base",
 				success: function() {
@@ -24,7 +25,9 @@ $(document).ready(function($) {
 					}, 1000 );
 				}
 			},
-		);
+		).fail(function(data) {
+			alert( data.responseJSON.data.message );
+		});
 	});
 
 	$("#date_sort_new").change( function() {
@@ -41,7 +44,8 @@ $(document).ready(function($) {
 			ajaxurl, {
 				data: {
 					"date_sort_new" : date_sort_new,
-					"date_sort_old" : date_sort_old
+					"date_sort_old" : date_sort_old,
+					"nonce" : DX_DAM.nonce,
 				},
 				action: "add_to_base",
 				success: function() {
@@ -52,7 +56,9 @@ $(document).ready(function($) {
 					}, 1000 );
 				}
 			},
-		);
+		).fail(function(data) {
+			alert( data.responseJSON.data.message );
+		});
 	});
 
 	$("#date_sort_old").change( function() {
@@ -64,12 +70,13 @@ $(document).ready(function($) {
 			var date_sort_old = 0;
 			var date_sort_new = 1;
 			alert("Showing newest media.");
-	}
+		}
 		$.post(
 			ajaxurl, {
 				data: {
 					"date_sort_new" : date_sort_new,
-					"date_sort_old" : date_sort_old
+					"date_sort_old" : date_sort_old,
+					"nonce" : DX_DAM.nonce,
 				},
 				action: "add_to_base",
 				success: function() {
@@ -80,7 +87,9 @@ $(document).ready(function($) {
 					}, 1000 );
 				}
 			},
-		);
+		).fail(function(data) {
+			alert( data.responseJSON.data.message );
+		});
 	});
 
 	$("#with_parent").change( function() {
@@ -97,7 +106,8 @@ $(document).ready(function($) {
 			ajaxurl, {
 				data: {
 					"with_parent" : with_parent,
-					"without_parent" : without_parent
+					"without_parent" : without_parent,
+					"nonce" : DX_DAM.nonce,
 				},
 				action: "add_to_base",
 				success: function() {
@@ -108,7 +118,9 @@ $(document).ready(function($) {
 					}, 1000 );
 				}
 			},
-		);
+		).fail(function(data) {
+			alert( data.responseJSON.data.message );
+		});
 	});
 
 	$("#without_parent").change( function() {
@@ -125,7 +137,8 @@ $(document).ready(function($) {
 			ajaxurl, {
 				data: {
 					"with_parent" : with_parent,
-					"without_parent" : without_parent
+					"without_parent" : without_parent,
+					"nonce" : DX_DAM.nonce,
 				},
 				action: "add_to_base",
 				success: function() {
@@ -136,6 +149,8 @@ $(document).ready(function($) {
 					}, 1000 );
 				}
 			},
-		);
+		).fail(function(data) {
+			alert( data.responseJSON.data.message );
+		});
 	});
 });

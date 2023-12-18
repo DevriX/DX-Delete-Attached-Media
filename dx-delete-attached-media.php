@@ -5,7 +5,7 @@
  * Description: Delete attached media to all posts (if activated). Remove images assigned to a post to clear old archives.
  * Author: nofearinc
  * Author URI: https://devrix.com
- * Version: 2.0.5.1
+ * Version: 2.0.6
  */
 
 register_activation_hook( __FILE__, 'am_plugin_activate' );
@@ -328,6 +328,14 @@ function add_dx_dam_js( $hook ) {
 	wp_enqueue_script( 'jquery' );
 	wp_register_script( 'dx-dam-script', plugins_url( '/assets/js/dx-dam-script.js', __FILE__ ), array( 'jquery' ), '2.0', true );
 	wp_enqueue_script( 'dx-dam-script' );
+	wp_localize_script(
+		'dx-dam-script',
+		'DX_DAM',
+		array(
+			'url'   => admin_url( 'admin-ajax.php' ),
+			'nonce' => wp_create_nonce( 'dx-dam-nonce' ),
+		)
+	);
 	wp_enqueue_style( 'main', plugin_dir_url( __FILE__ ) . '/assets/css/main.css', array(), '1.0' );
 
 	if ( 'toplevel_page_dx-dam-options' === $hook ) {
@@ -350,9 +358,13 @@ function dxdam_admin_user() {
  * Add to base the value of the checkbox/radio button
  */
 function add_to_base() {
+	$dxdam_data = wp_unslash( $_POST['data'] );
+	if ( ! wp_verify_nonce( $dxdam_data['nonce'], 'dx-dam-nonce' ) ) {
+		wp_send_json_error( array( 'message' => __( 'Sorry, something is wrong. Please try again.', 'dx-delete-attached-media' ) ), 500 );
+	}
+
 	$dx_delete_attached_media_options = get_option( 'dx_delete_attached_media_options' );
 	if ( isset( $_POST['data'] ) ) {
-		$dxdam_data = wp_unslash( $_POST['data'] );
 		if ( isset( $dxdam_data['enable-feature'] ) ) {
 			$dx_delete_attached_media_options['enable-feature'] = esc_html( $dxdam_data['enable-feature'] );
 		}
