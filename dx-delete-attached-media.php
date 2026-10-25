@@ -5,11 +5,18 @@
  * Description: Delete attached media to all posts (if activated). Remove images assigned to a post to clear old archives.
  * Author: nofearinc
  * Author URI: https://devrix.com
- * Version: 2.0.6
+ * Version: 2.1.0
+ * Text Domain: dx-delete-attached-media
+ * License: GPLv2 or later
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  */
 
-register_activation_hook( __FILE__, 'am_plugin_activate' );
-function am_plugin_activate() {
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+register_activation_hook( __FILE__, 'dx_dam_plugin_activate' );
+function dx_dam_plugin_activate() {
 	$dx_delete_attached_media_options = array(
 		'enable-feature' => '1',
 		'date_sort_new'  => '1',
@@ -40,8 +47,54 @@ if ( ! isset( $dx_delete_attached_media_options['enable-feature'] ) || ! isset( 
 * if checked hooked the functions
 */
 if ( '1' === $dx_delete_attached_media_options['enable-feature'] ) {
-	add_action( 'before_delete_post', 'delete_attachments' );
+	add_action( 'before_delete_post', 'dx_dam_delete_attachments' );
 	add_action( 'admin_notices', 'dx_dam_screen' );
+	add_action( 'current_screen', 'dx_dam_trash_media_column' );
+}
+
+/**
+ * On a Trash list, add a column with the number of media files attached to each post.
+ *
+ * @param WP_Screen $screen The current admin screen.
+ */
+function dx_dam_trash_media_column( $screen ) {
+	// Read-only check of the current list view, so no nonce is involved.
+	if ( 'edit' !== $screen->base || ! isset( $_GET['post_status'] ) || 'trash' !== sanitize_key( wp_unslash( $_GET['post_status'] ) ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		return;
+	}
+
+	add_filter(
+		'manage_' . $screen->post_type . '_posts_columns',
+		function ( $columns ) {
+			$columns['dx_dam_media'] = esc_html__( 'Attached media', 'dx-delete-attached-media' );
+			return $columns;
+		}
+	);
+	add_action(
+		'manage_' . $screen->post_type . '_posts_custom_column',
+		function ( $column, $post_id ) {
+			if ( 'dx_dam_media' !== $column ) {
+				return;
+			}
+			$count = count(
+				get_children(
+					array(
+						'post_parent' => $post_id,
+						'post_type'   => 'attachment',
+						'fields'      => 'ids',
+					)
+				)
+			);
+			if ( 0 === $count ) {
+				echo '&mdash;';
+				return;
+			}
+			/* translators: %s: number of media files attached to the post. */
+			printf( esc_html( _n( 'Up to %s file', 'Up to %s files', $count, 'dx-delete-attached-media' ) ), esc_html( number_format_i18n( $count ) ) );
+		},
+		10,
+		2
+	);
 }
 
 
@@ -55,57 +108,221 @@ function dx_dam_domain() {
 	load_plugin_textdomain( 'dx-delete-attached-media', false, basename( dirname( __FILE__ ) ) . '/languages/' );
 }
 
+/**
+ * Posts that still use an attachment, so it must not be deleted.
+ *
+ * Checks featured images; the file, the original of a scaled image and every generated size in the content
+ * or excerpt of other posts; classic [gallery] shortcodes; Easy Image Gallery galleries and WooCommerce
+ * product galleries. Posts of every type count (synced patterns, template parts, product variations, and
+ * post types of deactivated plugins too) and every status except trash and auto-draft; revisions and other
+ * attachments don't. The queries read the database directly, so language, search and other query filters
+ * can't hide a use. Other plugins can add their own uses through the dx_dam_attachment_used_in filter.
+ *
+ * @param int $attachment_id Attachment ID.
+ * @return int[] IDs of the posts using it.
+ */
 function dx_get_posts_by_attachment_id( $attachment_id ) {
+	global $wpdb;
 
-	$used_in_posts = array();
+	$attachment_id = (int) $attachment_id;
 
-	if ( wp_attachment_is_image( $attachment_id ) ) {
-		$query         = new WP_Query(
-			array(
-				'meta_key'       => '_thumbnail_id',
-				'meta_value'     => $attachment_id,
-				'post_type'      => 'any',
-				'fields'         => 'ids',
-				'no_found_rows'  => true,
-				'posts_per_page' => -1,
-			)
+	// phpcs:disable WordPress.DB.DirectDatabaseQuery -- live data is needed while deleting, and query filters must not hide uses.
+
+	// Featured images.
+	$used_in_posts = $wpdb->get_col(
+		$wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_thumbnail_id' AND meta_value = %s", (string) $attachment_id )
+	);
+
+	// The file in other posts, matched by its path inside the uploads folder as well as by its URLs, so links
+	// written before a move to https, a new domain or a CDN still count. One table scan for all of them.
+	$conditions = array();
+	foreach ( dx_dam_attachment_file_references( $attachment_id ) as $reference ) {
+		$like         = '%' . $wpdb->esc_like( $reference ) . '%';
+		$conditions[] = $wpdb->prepare( 'post_content LIKE %s OR post_excerpt LIKE %s', $like, $like );
+	}
+	if ( $conditions ) {
+		$used_in_posts = array_merge(
+			$used_in_posts,
+			$wpdb->get_col( "SELECT ID FROM {$wpdb->posts} WHERE post_type NOT IN ( 'revision', 'attachment' ) AND ( " . implode( ' OR ', $conditions ) . ' )' ) // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- every condition is prepared above.
 		);
-		$used_in_posts = array_merge( $used_in_posts, $query->posts );
 	}
 
-	$attachment_urls = array( wp_get_attachment_url( $attachment_id ) );
+	// Galleries kept in post meta: Easy Image Gallery (both formats) and WooCommerce product galleries.
+	// LIKE narrows the candidates; only an exact ID match counts (115 must not match 1150).
+	$gallery_rows = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key IN ( '_easy_image_gallery_v2', '_easy_image_gallery', '_product_image_gallery' ) AND meta_value LIKE %s",
+			'%' . $wpdb->esc_like( (string) $attachment_id ) . '%'
+		)
+	);
+	foreach ( $gallery_rows as $row ) {
+		if ( in_array( $attachment_id, dx_dam_ids_in_gallery_value( $row->meta_value ), true ) ) {
+			$used_in_posts[] = $row->post_id;
+		}
+	}
 
-	if ( wp_attachment_is_image( $attachment_id ) ) {
-		foreach ( get_intermediate_image_sizes() as $size ) {
-			$intermediate = image_get_intermediate_size( $attachment_id, $size );
-			if ( $intermediate ) {
-				$attachment_urls[] = $intermediate['url'];
+	// Classic [gallery ids="..."] shortcodes: LIKE narrows the candidates, the shortcode parser decides.
+	$shortcode_rows = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT ID, post_content FROM {$wpdb->posts} WHERE post_type NOT IN ( 'revision', 'attachment' ) AND post_content LIKE %s AND post_content LIKE %s",
+			'%' . $wpdb->esc_like( '[gallery' ) . '%',
+			'%' . $wpdb->esc_like( (string) $attachment_id ) . '%'
+		)
+	);
+	foreach ( $shortcode_rows as $row ) {
+		if ( in_array( $attachment_id, dx_dam_gallery_shortcode_ids( $row->post_content ), true ) ) {
+			$used_in_posts[] = $row->ID;
+		}
+	}
+
+	// phpcs:enable WordPress.DB.DirectDatabaseQuery
+
+	/**
+	 * Filters the posts that use an attachment. Attachments used by any post are kept and moved to it.
+	 *
+	 * @param int[] $used_in_posts IDs of the posts using the attachment.
+	 * @param int   $attachment_id Attachment ID.
+	 */
+	$used_in_posts = apply_filters( 'dx_dam_attachment_used_in', $used_in_posts, $attachment_id );
+
+	// Drop posts deleted earlier in this request (e.g. while emptying the trash), trashed posts and auto-drafts,
+	// revisions, and attachments: media is never moved under another attachment.
+	$used_in_posts = array_filter(
+		array_unique( array_map( 'intval', (array) $used_in_posts ) ),
+		function ( $post_id ) {
+			$post = get_post( $post_id );
+			return $post
+				&& ! in_array( $post->post_status, array( 'trash', 'auto-draft' ), true )
+				&& ! in_array( $post->post_type, array( 'revision', 'attachment' ), true );
+		}
+	);
+
+	return array_values( $used_in_posts );
+}
+
+/**
+ * Strings that identify an attachment's files in post content: the paths inside the uploads folder of the
+ * file, of the original of a scaled image and of every generated size, plus their URLs.
+ *
+ * @param int $attachment_id Attachment ID.
+ * @return string[]
+ */
+function dx_dam_attachment_file_references( $attachment_id ) {
+	$references = array();
+	$file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
+
+	if ( is_string( $file ) && '' !== $file ) {
+		$file         = _wp_relative_upload_path( $file );
+		$dir          = dirname( $file );
+		$dir          = '.' === $dir ? '' : trailingslashit( $dir );
+		$references[] = $file;
+
+		$metadata = wp_get_attachment_metadata( $attachment_id );
+		if ( ! empty( $metadata['original_image'] ) ) {
+			$references[] = $dir . $metadata['original_image'];
+		}
+		if ( ! empty( $metadata['sizes'] ) && is_array( $metadata['sizes'] ) ) {
+			foreach ( $metadata['sizes'] as $size ) {
+				if ( ! empty( $size['file'] ) ) {
+					$references[] = $dir . $size['file'];
+				}
 			}
 		}
 	}
 
-	foreach ( $attachment_urls as $attachment_url ) {
-		$query         = new WP_Query(
-			array(
-				's'              => $attachment_url,
-				'post_type'      => 'any',
-				'fields'         => 'ids',
-				'no_found_rows'  => true,
-				'posts_per_page' => -1,
-			)
-		);
-		$used_in_posts = array_merge( $used_in_posts, $query->posts );
+	// The URLs as WordPress serves them now, for files outside the uploads folder or rewritten by a plugin.
+	$references[] = wp_get_attachment_url( $attachment_id );
+	if ( wp_attachment_is_image( $attachment_id ) ) {
+		foreach ( get_intermediate_image_sizes() as $size ) {
+			$intermediate = image_get_intermediate_size( $attachment_id, $size );
+			if ( $intermediate ) {
+				$references[] = $intermediate['url'];
+			}
+		}
 	}
-	$used_in_posts = array_unique( $used_in_posts );
 
-	return $used_in_posts;
+	// An empty string would match every post (LIKE '%%'), so no file would ever be deleted.
+	return array_values(
+		array_unique(
+			array_filter(
+				$references,
+				function ( $reference ) {
+					return is_string( $reference ) && '' !== $reference;
+				}
+			)
+		)
+	);
+}
+
+/**
+ * Attachment IDs in a stored gallery value: Easy Image Gallery's serialized galleries (IDs under DATA),
+ * or a comma-separated list (Easy Image Gallery 1.x, WooCommerce product galleries).
+ *
+ * @param mixed $value The meta value.
+ * @return int[]
+ */
+function dx_dam_ids_in_gallery_value( $value ) {
+	$value = maybe_unserialize( $value );
+
+	if ( is_array( $value ) ) {
+		$ids = array();
+		foreach ( $value as $gallery ) {
+			if ( is_array( $gallery ) && isset( $gallery['DATA'] ) ) {
+				$ids = array_merge( $ids, wp_parse_id_list( $gallery['DATA'] ) );
+			}
+		}
+		return $ids;
+	}
+
+	return wp_parse_id_list( (string) $value );
+}
+
+/**
+ * Attachment IDs listed in the classic [gallery ids="..."] (or older include="...") shortcodes of a text.
+ *
+ * @param string $content Post content.
+ * @return int[]
+ */
+function dx_dam_gallery_shortcode_ids( $content ) {
+	$ids = array();
+
+	if ( ! preg_match_all( '/' . get_shortcode_regex( array( 'gallery' ) ) . '/', $content, $matches ) ) {
+		return $ids;
+	}
+
+	foreach ( $matches[3] as $attributes ) {
+		$atts = shortcode_parse_atts( $attributes );
+		foreach ( array( 'ids', 'include' ) as $key ) {
+			if ( ! empty( $atts[ $key ] ) ) {
+				$ids = array_merge( $ids, wp_parse_id_list( $atts[ $key ] ) );
+			}
+		}
+	}
+
+	return $ids;
 }
 
 /**
  * Delete attachments if no post is using the attachment
  * Checks if attachment is used in post and changes the parent id if the original post is deleted.
  */
-function delete_attachments( $post_id ) {
+function dx_dam_delete_attachments( $post_id ) {
+	/**
+	 * Filters whether to delete the media attached to a post that is being deleted permanently.
+	 *
+	 * Return false to keep it, for example while another plugin replaces posts programmatically.
+	 * Until 2.0.6 this callback was named delete_attachments, so remove_action() calls that used that
+	 * name no longer apply; this filter is the stable way to opt out.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param bool $delete  Whether to delete the post's attached media. Default true.
+	 * @param int  $post_id ID of the post being deleted.
+	 */
+	if ( ! apply_filters( 'dx_dam_delete_post_attachments', true, $post_id ) ) {
+		return;
+	}
+
 	$custom      = get_post_custom( $post_id );
 	$args        = array(
 		'post_type'   => 'attachment',
@@ -117,7 +334,8 @@ function delete_attachments( $post_id ) {
 
 	if ( $attachments ) {
 		foreach ( $attachments as $attachment ) {
-			$used_in_posts = dx_get_posts_by_attachment_id( $attachment->ID );
+			// The post being deleted is not a use: on a direct (non-trash) delete it still matches its own media.
+			$used_in_posts = array_values( array_diff( dx_get_posts_by_attachment_id( $attachment->ID ), array( $post_id ) ) );
 			if ( ! empty( $used_in_posts ) ) {
 				$args = array(
 					'ID'          => $attachment->ID,
@@ -159,14 +377,14 @@ function dx_dam_activation_welcome() {
 	if ( is_admin() && get_transient( 'dx_dam_activation' ) ) {
 		?>
 		<div class="updated notice is-dismissible">
-			<h1 class="heading"><?php _e( 'Thank you for installing DX Delete Attached Media!', 'dx-delete-attached-media' ); ?></h1>
+			<h1 class="heading"><?php esc_html_e( 'Thank you for installing DX Delete Attached Media!', 'dx-delete-attached-media' ); ?></h1>
 			<p class="description">
 				<?php
 				printf(
 					'%s<strong>%s</strong>%s.',
-					__( 'This plugin deletes all attached media to a post once you have decided to delete it permanently. Please, always create a site ', 'dx-delete-attached-media' ),
-					__( 'backup', 'dx-delete-attached-media' ),
-					__( ' before deleting a post', 'dx-delete-attached-media' )
+					esc_html__( 'This plugin deletes all attached media to a post once you have decided to delete it permanently. Please, always create a site ', 'dx-delete-attached-media' ),
+					esc_html__( 'backup', 'dx-delete-attached-media' ),
+					esc_html__( ' before deleting a post', 'dx-delete-attached-media' )
 				);
 				?>
 			</p>
@@ -192,7 +410,7 @@ function dx_dam_page() {
 		'dashicons-images-alt2'
 	);
 
-	add_submenu_page( 'dx-dam-options', __( 'Help page', 'dx-dam-help-page' ), __( 'Help page', 'dx-dam-help-page' ), 'manage_options', 'dx_dam_help', 'dx_dam_help_callback' );
+	add_submenu_page( 'dx-dam-options', __( 'Help page', 'dx-delete-attached-media' ), __( 'Help page', 'dx-delete-attached-media' ), 'manage_options', 'dx_dam_help', 'dx_dam_help_callback' );
 }
 
 /**
@@ -218,8 +436,8 @@ function dx_dam_page_callback() {
 	?>
 <div class="dx-template-wrapper">
 	<div class="wrap content-wrapper">
-		<h1 class="heading"><?php _e( 'DX Delete Attached Media', 'dx-delete-attached-media' ); ?></h1>
-		<p class="description"><?php _e( 'This is a list of attachements that will be deleted once you have opted to delete the parent post permanently. Always make a site backup before deleting a post.', 'dx-delete-attached-media' ); ?></p>
+		<h1 class="heading"><?php esc_html_e( 'DX Delete Attached Media', 'dx-delete-attached-media' ); ?></h1>
+		<p class="description"><?php esc_html_e( 'This is a list of attachements that will be deleted once you have opted to delete the parent post permanently. Always make a site backup before deleting a post.', 'dx-delete-attached-media' ); ?></p>
 		<?php
 		if ( current_user_can( 'manage_options' ) ) :
 			$checkbox_enable_feature_settings = '<input type="checkbox" id="enable-feature" name="enable-feature" value="1" ' . checked( 1, $dx_delete_attached_media_options['enable-feature'], false ) . '/>';
@@ -227,58 +445,33 @@ function dx_dam_page_callback() {
 			$sort_date_newest = '<input type="radio" id="date_sort_new" name="date_sort_new" value="1" ' . checked( 1, $dx_delete_attached_media_options['date_sort_new'], false ) . '/>';
 			$sort_date_oldest = '<input type="radio" id="date_sort_old" name="date_sort_old" value="1" ' . checked( 1, $dx_delete_attached_media_options['date_sort_old'], false ) . '/>';
 			$parent_with      = '<input type="radio" id="with_parent" name="with_parent" value="1" ' . checked( 1, $dx_delete_attached_media_options['with_parent'], false ) . '/>';
+			$dx_dam_input_html = array(
+				'input' => array( 'type' => true, 'id' => true, 'name' => true, 'value' => true, 'checked' => true ),
+			);
 			$parent_without   = '<input type="radio" id="without_parent" name="without_parent" value="1" ' . checked( 1, $dx_delete_attached_media_options['without_parent'], false ) . '/>';
 
 			?>
-			<html>
-				<head>
-				<style>
-				table {
-				font-family: arial, sans-serif;
-				border-collapse: collapse;
-				}
-
-				td, th {
-				text-align: left;
-				padding: 8px;
-				}
-
-				tr:nth-child(even) {
-				background-color: #dddddd;
-				}
-				</style>
-				</head>
-				<body>
-
-				<h2><?php echo $checkbox_enable_feature_settings; ?>Enable feature</h2>
-
-				<table>
+			<div id="dx-dam-status" class="notice inline" role="status" style="display:none"><p></p></div>
+			<table class="form-table" role="presentation">
 				<tr>
-					<h3><th>Filters</th></h3>
-					<th></th>
-					<th></th>
+					<th scope="row"><?php esc_html_e( 'Delete attached media', 'dx-delete-attached-media' ); ?></th>
+					<td><label for="enable-feature"><?php echo wp_kses( $checkbox_enable_feature_settings, $dx_dam_input_html ); ?> <?php esc_html_e( 'Delete a post\'s attached media when the post is deleted permanently', 'dx-delete-attached-media' ); ?></label></td>
 				</tr>
 				<tr>
-					<th>Media files</th>
-					<th></th>
-					<th></th>
+					<th scope="row"><?php esc_html_e( 'Sort the list below', 'dx-delete-attached-media' ); ?></th>
+					<td>
+						<label for="date_sort_new"><?php echo wp_kses( $sort_date_newest, $dx_dam_input_html ); ?> <?php esc_html_e( 'Newest first', 'dx-delete-attached-media' ); ?></label><br />
+						<label for="date_sort_old"><?php echo wp_kses( $sort_date_oldest, $dx_dam_input_html ); ?> <?php esc_html_e( 'Oldest first', 'dx-delete-attached-media' ); ?></label>
+					</td>
 				</tr>
 				<tr>
-					<td>Date added</td>
-					<td><?php echo $sort_date_newest; ?>Newest</td>
-					<td><?php echo $sort_date_oldest; ?>Oldest</td>
+					<th scope="row"><?php esc_html_e( 'Show', 'dx-delete-attached-media' ); ?></th>
+					<td>
+						<label for="with_parent"><?php echo wp_kses( $parent_with, $dx_dam_input_html ); ?> <?php esc_html_e( 'Used media (attached to a post)', 'dx-delete-attached-media' ); ?></label><br />
+						<label for="without_parent"><?php echo wp_kses( $parent_without, $dx_dam_input_html ); ?> <?php esc_html_e( 'Unused media (not attached to any post)', 'dx-delete-attached-media' ); ?></label>
+					</td>
 				</tr>
-				<tr>
-					<td>Parent post</td>
-					<td><?php echo $parent_with; ?>Used media</td>
-					<td><?php echo $parent_without; ?>Unused media</td>
-				</tr>
-
-				</table>
-
-				</body>
-				</html>
-
+			</table>
 			<?php
 		endif;
 		include_once plugin_dir_path( __FILE__ ) . '/dx-attachments-list.php';
@@ -300,17 +493,18 @@ function dx_dam_screen() {
 
 	$screen = get_current_screen();
 
-	if ( isset( $_GET['post_status'] ) && isset( $screen->base ) ) {
-		if ( 'edit' === $screen->base && 'trash' === $_GET['post_status'] ) {
+	// Read-only check of the current list view, so no nonce is involved.
+	if ( isset( $_GET['post_status'] ) && isset( $screen->base ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		if ( 'edit' === $screen->base && 'trash' === sanitize_key( wp_unslash( $_GET['post_status'] ) ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 			?>
 			<div class="updated notice">
 				<p class="description">
 					<?php
 					printf(
 						'%s<strong>%s</strong>%s.',
-						__( 'Howdy!, You are using DX Delete Attached Media plugin. It deletes all attached media to a post once you have decided to delete the post permanently. Please, always create a site ', 'dx-delete-attached-media' ),
-						__( 'backup', 'dx-delete-attached-media' ),
-						__( ' before deleting a post', 'dx-delete-attached-media' )
+						esc_html__( 'Howdy! DX Delete Attached Media deletes the media attached to a post when you delete the post permanently. Files still used elsewhere (featured images, galleries, other posts) are kept. Please, always create a site ', 'dx-delete-attached-media' ),
+						esc_html__( 'backup', 'dx-delete-attached-media' ),
+						esc_html__( ' before deleting a post', 'dx-delete-attached-media' )
 					);
 					?>
 				</p>
@@ -325,22 +519,25 @@ function dx_dam_screen() {
  */
 add_action( 'admin_enqueue_scripts', 'add_dx_dam_js' );
 function add_dx_dam_js( $hook ) {
+	// Only the plugin's own screens use these; elsewhere they were dead weight under a generic 'main' handle.
+	if ( false === strpos( $hook, 'dx-dam-options' ) && false === strpos( $hook, 'dx_dam_help' ) ) {
+		return;
+	}
 	wp_enqueue_script( 'jquery' );
-	wp_register_script( 'dx-dam-script', plugins_url( '/assets/js/dx-dam-script.js', __FILE__ ), array( 'jquery' ), '2.0', true );
+	wp_register_script( 'dx-dam-script', plugins_url( '/assets/js/dx-dam-script.js', __FILE__ ), array( 'jquery' ), '2.1.0', true );
 	wp_enqueue_script( 'dx-dam-script' );
 	wp_localize_script(
 		'dx-dam-script',
 		'DX_DAM',
 		array(
-			'url'   => admin_url( 'admin-ajax.php' ),
-			'nonce' => wp_create_nonce( 'dx-dam-nonce' ),
+			'url'    => admin_url( 'admin-ajax.php' ),
+			'nonce'  => wp_create_nonce( 'dx-dam-nonce' ),
+			'saving' => __( 'Saving...', 'dx-delete-attached-media' ),
+			'saved'  => __( 'Saved. Updating the list...', 'dx-delete-attached-media' ),
+			'failed' => __( 'Sorry, something is wrong. Please try again.', 'dx-delete-attached-media' ),
 		)
 	);
-	wp_enqueue_style( 'main', plugin_dir_url( __FILE__ ) . '/assets/css/main.css', array(), '1.0' );
-
-	if ( 'toplevel_page_dx-dam-options' === $hook ) {
-		wp_enqueue_style( 'main', plugin_dir_url( __FILE__ ) . '/assets/css/main.css', array(), '1.1' );
-	}
+	wp_enqueue_style( 'dx-dam-main', plugin_dir_url( __FILE__ ) . '/assets/css/main.css', array(), '2.1.0' );
 }
 
 add_action( 'init', 'dxdam_admin_user' );
@@ -350,16 +547,19 @@ add_action( 'after_setup_theme', 'dxdam_admin_user' );
  */
 function dxdam_admin_user() {
 	if ( current_user_can( 'manage_options' ) ) {
-		add_action( 'wp_ajax_add_to_base', 'add_to_base', 1 );
+		add_action( 'wp_ajax_dx_dam_add_to_base', 'dx_dam_add_to_base', 1 );
 	}
 }
 
 /**
  * Add to base the value of the checkbox/radio button
  */
-function add_to_base() {
-	$dxdam_data = wp_unslash( $_POST['data'] );
-	if ( ! wp_verify_nonce( $dxdam_data['nonce'], 'dx-dam-nonce' ) ) {
+function dx_dam_add_to_base() {
+	if ( ! isset( $_POST['data'] ) || ! is_array( $_POST['data'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- the nonce is inside data, checked below.
+		wp_send_json_error( array( 'message' => __( 'Sorry, something is wrong. Please try again.', 'dx-delete-attached-media' ) ), 400 );
+	}
+	$dxdam_data = map_deep( wp_unslash( $_POST['data'] ), 'sanitize_text_field' ); // phpcs:ignore WordPress.Security.NonceVerification.Missing
+	if ( ! isset( $dxdam_data['nonce'] ) || ! wp_verify_nonce( $dxdam_data['nonce'], 'dx-dam-nonce' ) ) {
 		wp_send_json_error( array( 'message' => __( 'Sorry, something is wrong. Please try again.', 'dx-delete-attached-media' ) ), 500 );
 	}
 

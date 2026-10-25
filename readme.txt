@@ -3,8 +3,10 @@ Contributors: devrix, nofearinc
 Tags: media, attachment, post
 Requires at least: 4.5
 Requires PHP: 7.4
-Tested up to: 6.3.2
-Stable tag: 2.0.6
+Tested up to: 7.1
+Stable tag: 2.1.0
+License: GPLv2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
 Automatically deletes attached media from posts and custom post types added via the Media button.
 
@@ -39,11 +41,42 @@ Yes, as long as you attach images via the Media button, they are going to be del
 
 It works for all of your deleted posts, as long as you delete them from the system. Keep in mind that the soft delete sends your post to Trash first, and deleting the media would happen once your Trash is being emptied. 
 
+= Which media is kept? =
+
+Files that are still used elsewhere are kept, and attached to a post that uses them. A file counts as used when it is the featured image of another post, when the file or any of its sizes appears in another post's content or excerpt (matched by its path in the uploads folder, so links from before a move to https or a new domain count too), or when it is listed in a classic [gallery] shortcode, an Easy Image Gallery gallery or a WooCommerce product gallery.
+
+Every post type counts, including synced patterns, template parts and product variations, and every status except Trash. Uses that only store the file's ID somewhere else, such as custom fields or page builder data, aren't detected: add them with the filter below.
+
+= Can I protect media used by another plugin, such as ACF image fields? =
+
+Yes. Add the IDs of the posts that use the file with the `dx_dam_attachment_used_in` filter, which receives the list of post IDs and the attachment ID: `add_filter( 'dx_dam_attachment_used_in', 'my_media_uses', 10, 2 );`
+
+= Can I keep the media of some posts? =
+
+Yes. Return false from the `dx_dam_delete_post_attachments` filter, which receives `true` and the ID of the post being deleted, and that post's media stays in the library.
+
 == Upgrade Notice ==
+= 2.1.0 =
+Media still used elsewhere is now kept. Media is also deleted when a post is deleted without the trash (WP-CLI, REST API, EMPTY_TRASH_DAYS 0, other plugins). To opt out, use the dx_dam_delete_post_attachments filter.
+
 = 1.0 =
 * Extended support for WooCommerce and Easy Digital Downloads.
 
 == Changelog ==
+
+= 2.1.0 =
+* New: media that is still used elsewhere is no longer deleted. Besides featured images and files in post content, the plugin now checks excerpts, classic [gallery] shortcodes, Easy Image Gallery galleries, WooCommerce product galleries, posts of every status except Trash, and every post type, including synced patterns, template parts, product variations and post types of deactivated plugins. Files are matched by their path in the uploads folder, so links from before a move to https or a new domain count. Developers can add more with the dx_dam_attachment_used_in filter.
+* New: the dx_dam_delete_post_attachments filter keeps the media of a post when it returns false. The delete callback is now named dx_dam_delete_attachments; code that removed the old delete_attachments callback should use this filter.
+* New: the Trash screen shows how many media files are attached to each post.
+* Fixed: opening the plugin's media list could detach media from posts whose post type wasn't registered at that moment (for example products while WooCommerce was deactivated), so that media was never deleted with its post. The list now only displays.
+* Improved: the settings page uses the standard WordPress layout, and confirms changes on the page instead of pop-up alerts.
+* Fixed: a settings change could be lost when saving took longer than a second (the page reloaded too early).
+* Fixed: deleting a post without the trash (WP-CLI --force, the REST API, EMPTY_TRASH_DAYS set to 0, or another plugin deleting posts) left its media behind, orphaned. That media is now deleted too, unless it is used elsewhere.
+* Fixed: the media list page stopped with a fatal error on PHP 8 when a media item had no file.
+* Security: escaped admin output and validated the settings request.
+* Prefixed the plugin's global functions and AJAX action to avoid conflicts with other plugins.
+* Scripts and styles now load only on the plugin's own screens.
+* Tested with WordPress 7.1, PHP 7.4 to 8.5.
 
 = 2.0.6 = 
 * Fixed vulnerability report

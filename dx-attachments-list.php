@@ -1,4 +1,8 @@
 <?php
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 if ( ! class_exists( 'WP_List_Table' ) ) {
 	require_once ABSPATH . 'wp-admin/includes/class-wp-list-table.php';
 }
@@ -57,7 +61,7 @@ class DX_DAM_List extends WP_List_Table {
 			array(
 				'post_type'     => 'attachment',
 				'post_status'   => 'inherit',
-				'post_per_page' => 10,
+				'posts_per_page' => 10,
 				'paged'         => $current_page,
 				$post_parent    => array( 0 ),
 				'order_by'      => 'date',
@@ -127,46 +131,41 @@ class DX_DAM_List extends WP_List_Table {
 				$merged_array = array_merge( $used_in_content, $used_as_thumbnail, $attachment_ancestors );
 				$merged_array = array_unique( $merged_array );
 
-				foreach ( $merged_array as $post ) {
-					if ( ! post_type_exists( get_post_type( $post ) ) ) {
-						array_splice( $merged_array, array_search( $post, $merged_array, true ) );
-					}
+				// Ignore posts whose type no longer exists.
+				$merged_array = array_values(
+					array_filter(
+						$merged_array,
+						function ( $post ) {
+							return post_type_exists( get_post_type( $post ) );
+						}
+					)
+				);
+
+				// List the media under a post that uses it. This page only displays: it used to save that parent
+				// (always as post ID 1) or detach unused media, which then were never deleted with their post.
+				if ( ! in_array( $attchement->post_parent, $merged_array, true ) && ! empty( $merged_array ) ) {
+					$attchement->post_parent = $merged_array[0];
 				}
-				
-				if ( ! in_array( $attchement->post_parent, $merged_array, true ) ) {
-					if ( ! empty( $merged_array ) ) {
-						$attchement->post_parent = $merged_array[0];
-						wp_update_post(
-							array(
-								'ID'          => $attchement->ID,
-								'post_parent' => 1,
-							)
-						);
-					} else {
-						wp_update_post(
-							array(
-								'ID'          => $attchement->ID,
-								'post_parent' => 0,
-							)
-						);
-					}
-				}
+				// Media without a file on disk is listed as a document: getimagesize('') is a fatal error on PHP 8.
+				$file     = get_attached_file( $attchement->ID );
+				$is_image = $file && file_exists( $file ) && file_is_valid_image( $file );
+
 				/**
 				 * If the media is used in one or more posts
 				 */
-				if ( ! empty( $attchement->post_parent ) && file_is_valid_image( get_attached_file( $attchement->ID ) ) ) {
+				if ( ! empty( $attchement->post_parent ) && $is_image ) {
 					$data[] = array(
 						'post_title'  => '<a href="' . admin_url() . 'post.php?post=' . $attchement->ID . '&action=edit' . '">' . '<img src="' . wp_get_attachment_thumb_url( $attchement->ID ) . '" width="50px" />',
 						'post_parent' => '<a href="' . get_permalink( $attchement->post_parent ) . '"><b>' . get_the_title( $attchement->post_parent ) . '</b></a>',
 						'all_posts'   => $merged_array,
 					);
-				} elseif ( ! empty( $attchement->post_parent ) && ! file_is_valid_image( get_attached_file( $attchement->ID ) ) ) {
+				} elseif ( ! empty( $attchement->post_parent ) && ! $is_image ) {
 					$data[] = array(
 						'post_title'  => '<a href="' . admin_url() . 'post.php?post=' . $attchement->ID . '&action=edit' . '">' . '<span class="dashicons dashicons-media-document"></span>',
 						'post_parent' => '<a href="' . get_permalink( $attchement->post_parent ) . '"><b>' . get_the_title( $attchement->post_parent ) . '</b></a>',
 						'all_posts'   => $merged_array,
 					);
-				} elseif ( empty( $attchement->post_parent ) && ! file_is_valid_image( get_attached_file( $attchement->ID ) ) ) {
+				} elseif ( empty( $attchement->post_parent ) && ! $is_image ) {
 					$data[] = array(
 						'post_title'  => '<a href="' . admin_url() . 'post.php?post=' . $attchement->ID . '&action=edit' . '">' . '<span class="dashicons dashicons-media-document"></span>',
 						'post_parent' => '<span class="dx-table-bold">Unused file</span>',

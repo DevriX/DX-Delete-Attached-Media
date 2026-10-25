@@ -1,6 +1,11 @@
+<?php
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+?>
 <div class="dx-help-page">
 	<header class="help-header">
-		<h2 class="logo"><img src="<?php echo plugin_dir_url( __FILE__ ) . '../images/devrix-logo-white.svg'; ?>" alt="" /></h2><!-- .logo -->
+		<h2 class="logo"><img src="<?php echo esc_url( plugin_dir_url( __FILE__ ) . '../images/devrix-logo-white.svg' ); ?>" alt="" /></h2><!-- .logo -->
 		<div class="page-info">
 			<h3 class="page-title">Documentation</h3><!-- .page-title -->
 			<h4 class="page-subtitle">DX Delete Attached Media</h4><!-- .page-subtitlr -->
@@ -49,7 +54,7 @@
 					You can check the used and unused media in the plugin admin page. Navigate to the "<strong>DX Delete Attached Media</strong>" page:
 				</p>
 
-				<img src="<?php echo plugin_dir_url( __FILE__ ) . '../images/image1.png'; ?>" alt="plugin menu" style="border: 5px solid #555"/>
+				<img src="<?php echo esc_url( plugin_dir_url( __FILE__ ) . '../images/image1.png' ); ?>" alt="plugin menu" style="border: 5px solid #555"/>
 
 				<p>
 					By default, after activating the plugin will be activated the following three options:
@@ -58,7 +63,7 @@
 					<li>Post parent: Used media - means that will display only the used media files.</li>
 				</p>
 
-				<img src="<?php echo plugin_dir_url( __FILE__ ) . '../images/image2.png'; ?>" alt="activated filters" style="border: 5px solid #555"/>
+				<img src="<?php echo esc_url( plugin_dir_url( __FILE__ ) . '../images/image2.png' ); ?>" alt="activated filters" style="border: 5px solid #555"/>
 
 				<p>
 					If uncheck <strong>"Enable banner"</strong>, the plugin will still be active, but it's functionallity will be disabled.
@@ -71,7 +76,7 @@
 					<strong>"Oldest"</strong> will be checked. The media files will be sorted <strong>ascending</strong> in the table.
 				</p>
 
-				<img src="<?php echo plugin_dir_url( __FILE__ ) . '../images/image3.png'; ?>" alt="oldest" style="border: 5px solid #555"/>
+				<img src="<?php echo esc_url( plugin_dir_url( __FILE__ ) . '../images/image3.png' ); ?>" alt="oldest" style="border: 5px solid #555"/>
 
 				<p>
 					If uncheck one of the <strong>"Parent post"</strong> filter options, the other one will be activated. For example when
@@ -79,18 +84,18 @@
 					<strong>"Unused media"</strong> will be checked. In the table will be displayed only the <strong>unused</strong> media files.
 				</p>
 
-				<img src="<?php echo plugin_dir_url( __FILE__ ) . '../images/image4.png'; ?>" alt="unused" style="border: 5px solid #555"/>
+				<img src="<?php echo esc_url( plugin_dir_url( __FILE__ ) . '../images/image4.png' ); ?>" alt="unused" style="border: 5px solid #555"/>
 
 				<p>
 					By clicking on the image preview,
 				</p>
 
-				<img src="<?php echo plugin_dir_url( __FILE__ ) . '../images/image5.png'; ?>" alt="click media" style="border: 5px solid #555"/>
+				<img src="<?php echo esc_url( plugin_dir_url( __FILE__ ) . '../images/image5.png' ); ?>" alt="click media" style="border: 5px solid #555"/>
 				<p>	
 					you will be redirected to the media editor.
 				</p>
 
-				<img src="<?php echo plugin_dir_url( __FILE__ ) . '../images/image6.png'; ?>" alt="media editor" style="border: 5px solid #555"/>
+				<img src="<?php echo esc_url( plugin_dir_url( __FILE__ ) . '../images/image6.png' ); ?>" alt="media editor" style="border: 5px solid #555"/>
 
 				<div class="dx-help-footer">
 					<h3>And much more</h3>
@@ -107,7 +112,7 @@
 			<h2 class="widget-heading">Other DevriX Plugins</h2><!-- .widget-heading -->
 			<div class="plugins-list">
 				<a class="item" href="https://wordpress.org/plugins/dx-out-of-date/" target="_blank">
-					<img src="<?php echo plugin_dir_url( __FILE__ ) . '../images/plugin3.png'; ?>" alt="" />
+					<img src="<?php echo esc_url( plugin_dir_url( __FILE__ ) . '../images/plugin3.png' ); ?>" alt="" />
 					<div class="content">
 						<strong>DX Out of Date</strong>
 						<p>DX Out of Date allows you<br/> to display a notification<br/> box on your posts<br/> when a given amount<br/> of time has passed.</p>
@@ -115,7 +120,7 @@
 				</a>
 
 				<a class="item" href="https://wordpress.org/plugins/dx-share-selection/" target="_blank">
-					<img src="<?php echo plugin_dir_url( __FILE__ ) . '../images/plugin2.png'; ?>" alt="" />
+					<img src="<?php echo esc_url( plugin_dir_url( __FILE__ ) . '../images/plugin2.png' ); ?>" alt="" />
 					<div class="content">
 						<strong>DX Share Selection</strong>
 						<p>Allows you to<br/> share/search selected<br/> text from your site -<br/> select a snippet, search<br/> for it or share it to<br/> popular social networks.</p>
@@ -123,7 +128,7 @@
 				</a>
 
 				<a class="item" href="https://wordpress.org/plugins/easy-image-gallery/" target="_blank">
-					<img src="<?php echo plugin_dir_url( __FILE__ ) . '../images/plugin1.png'; ?>" alt="" />
+					<img src="<?php echo esc_url( plugin_dir_url( __FILE__ ) . '../images/plugin1.png' ); ?>" alt="" />
 					<div class="content">
 						<strong>Easy Image Gallery</strong>
 						<p>Easily create an image<br/> gallery on your posts,<br/> pages or any <br/>custom post type.</p>
